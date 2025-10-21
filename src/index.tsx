@@ -35,7 +35,7 @@ const restartService = callable<[], CommandResult>("restart_service");
 const enableService = callable<[], CommandResult>("enable_service");
 const disableService = callable<[], CommandResult>("disable_service");
 
-const SERVICE_TITLE = "DeckShock4 systemd service";
+//const SERVICE_TITLE = "DeckShock4 systemd service";
 
 function Content() {
   const [status, setStatus] = useState<ServiceStatus | null>(null);
@@ -107,10 +107,9 @@ function Content() {
   }, [status, loadingStatus]);
 
   return (
-    <PanelSection title="DeckShock4">
+    <PanelSection title="Service">
       <PanelSectionRow>
         <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-          <div className={staticClasses.Title}>{SERVICE_TITLE}</div>
           <div>Status: {statusSummary}</div>
           <div>Enabled: {status?.enabled ? "Yes" : "No"}</div>
           {error && <div style={{ color: "var(--warning)" }}>{error}</div>}
