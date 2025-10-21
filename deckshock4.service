@@ -1,0 +1,12 @@
+[Unit]
+Description=deckshock4 (DualShock 4 emulator for Steam Deck)
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/deckshock4
+# deckshock4 responds to Ctrl-C in a terminal; emulate that with SIGINT
+KillSignal=SIGINT
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
