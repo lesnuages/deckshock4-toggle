@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  package-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Determine release version
+        id: vars
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Package plugin
+        id: package
+        env:
+          RELEASE_VERSION: ${{ steps.vars.outputs.version }}
+        run: |
+          scripts/package.sh "${RELEASE_VERSION}"
+          ZIP_PATH="out/deckshock4-toggle-v${RELEASE_VERSION}.zip"
+          if [ ! -f "$ZIP_PATH" ]; then
+            echo "Expected package at $ZIP_PATH" >&2
+            exit 1
+          fi
+          echo "zip_path=${ZIP_PATH}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deckshock4-toggle-${{ steps.vars.outputs.version }}
+          path: ${{ steps.package.outputs.zip_path }}
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: DeckShock4 Toggle ${{ github.ref_name }}
+          files: ${{ steps.package.outputs.zip_path }}
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
