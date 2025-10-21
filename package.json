@@ -1,7 +1,7 @@
 {
-  "name": "decky-plugin-template",
+  "name": "deckshock4-toggle",
   "version": "0.0.1",
-  "description": "A template to quickly create decky plugins from scratch, based on TypeScript and webpack",
+  "description": "Decky plugin that manages the deckshock4 systemd service on the Steam Deck.",
   "type": "module",
   "scripts": {
     "build": "rollup -c",
@@ -10,21 +10,22 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/SteamDeckHomebrew/decky-plugin-template.git"
+    "url": "git+https://github.com/lesnuages/deckshock4-toggle.git"
   },
   "keywords": [
     "decky",
     "plugin",
-    "plugin-template",
+    "deckshock4",
     "steam-deck",
-    "deck"
+    "systemd",
+    "decky"
   ],
-  "author": "You <you@you.tld>",
+  "author": "lesnuages",
   "license": "BSD-3-Clause",
   "bugs": {
-    "url": "https://github.com/SteamDeckHomebrew/decky-plugin-template/issues"
+    "url": "https://github.com/lesnuages/deckshock4-toggle/issues"
   },
-  "homepage": "https://github.com/SteamDeckHomebrew/decky-plugin-template#readme",
+  "homepage": "https://github.com/lesnuages/deckshock4-toggle#readme",
   "devDependencies": {
     "@decky/rollup": "^1.0.1",
     "@decky/ui": "^4.7.2",

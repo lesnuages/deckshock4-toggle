@@ -1,57 +1,194 @@
-import os
-
-# The decky plugin module is located at decky-loader/plugin
-# For easy intellisense checkout the decky-loader code repo
-# and add the `decky-loader/plugin/imports` path to `python.analysis.extraPaths` in `.vscode/settings.json`
-import decky
 import asyncio
+from asyncio.subprocess import PIPE
+import os
+from typing import Dict, List, Optional, Tuple
+
+import decky
+
+
+SERVICE_UNIT = "deckshock4.service"
+SHOW_PROPERTIES: Tuple[str, ...] = (
+    "Id",
+    "LoadState",
+    "ActiveState",
+    "SubState",
+    "UnitFileState",
+    "Description",
+)
+
+
+def _decode(stream: bytes) -> str:
+    return stream.decode("utf-8", errors="replace").strip()
+
+
+def _is_enabled(unit_file_state: Optional[str]) -> bool:
+    return unit_file_state in ("enabled", "enabled-runtime")
+
+
+def _should_fallback_to_system(stderr: str) -> bool:
+    lowered = stderr.lower()
+    service = SERVICE_UNIT.lower()
+    if not lowered:
+        return False
+    if service in lowered and (
+        "could not be found" in lowered
+        or "not found" in lowered
+        or "unknown unit" in lowered
+        or ("unit file" in lowered and "does not exist" in lowered)
+        or "no such file or directory" in lowered
+    ):
+        return True
+    if "failed to connect to bus" in lowered:
+        return True
+    return False
+
 
 class Plugin:
-    # A normal method. It can be called from the TypeScript side using @decky/api.
-    async def add(self, left: int, right: int) -> int:
-        return left + right
+    async def _run_systemctl(self, *args: str) -> Dict[str, object]:
+        commands: List[Tuple[List[str], bool]] = [
+            (["systemctl", "--user", *args], True),
+            (["systemctl", *args], False),
+        ]
 
-    async def long_running(self):
-        await asyncio.sleep(15)
-        # Passing through a bunch of random data, just as an example
-        await decky.emit("timer_event", "Hello from the backend!", True, 2)
+        last_result: Optional[Dict[str, object]] = None
+        env = os.environ.copy()
+        removed_env_vars: List[str] = []
+        for var in ("LD_LIBRARY_PATH", "PYTHONHOME", "PYTHONPATH"):
+            if var in env:
+                env.pop(var)
+                removed_env_vars.append(var)
 
-    # Asyncio-compatible long-running code, executed in a task when the plugin is loaded
+        if removed_env_vars:
+            decky.logger.debug(
+                "Sanitized environment for systemctl (removed %s variables)",
+                ", ".join(removed_env_vars),
+            )
+
+        for command, allow_fallback in commands:
+            decky.logger.debug("Executing command: %s", " ".join(command))
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                stdout=PIPE,
+                stderr=PIPE,
+                env=env,
+            )
+            stdout, stderr = await process.communicate()
+
+            result = {
+                "ok": process.returncode == 0,
+                "stdout": _decode(stdout),
+                "stderr": _decode(stderr),
+                "returncode": process.returncode,
+                "command": command,
+            }
+
+            if result["ok"]:
+                return result
+
+            last_result = result
+            decky.logger.warning(
+                "systemctl command failed (rc=%s): %s | stderr=%s",
+                process.returncode,
+                " ".join(command),
+                result["stderr"],
+            )
+            if not allow_fallback:
+                break
+            if not _should_fallback_to_system(result["stderr"]):
+                break
+
+        return last_result or {
+            "ok": False,
+            "stdout": "",
+            "stderr": "systemctl command failed",
+            "returncode": -1,
+            "command": commands[-1],
+        }
+
+    async def _service_action(self, action: str) -> Dict[str, object]:
+        result = await self._run_systemctl(action, SERVICE_UNIT)
+        if result["ok"]:
+            decky.logger.info("Successfully executed %s for %s", action, SERVICE_UNIT)
+        else:
+            decky.logger.error(
+                "Failed to execute %s for %s: %s",
+                action,
+                SERVICE_UNIT,
+                result["stderr"],
+            )
+        return result
+
+    async def get_status(self) -> Dict[str, object]:
+        args = ["show", SERVICE_UNIT]
+        for prop in SHOW_PROPERTIES:
+            args.append(f"--property={prop}")
+
+        result = await self._run_systemctl(*args)
+        if not result["ok"]:
+            return {
+                "ok": False,
+                "error": result["stderr"] or "Unable to read service status",
+            }
+
+        status: Dict[str, str] = {}
+        for line in result["stdout"].splitlines():
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            status[key] = value
+
+        active_state = status.get("ActiveState", "unknown")
+        sub_state = status.get("SubState", "unknown")
+        unit_file_state = status.get("UnitFileState", "unknown")
+
+        formatted = {
+            "ok": True,
+            "status": {
+                "id": status.get("Id", SERVICE_UNIT),
+                "description": status.get("Description", "DeckShock4 service"),
+                "active_state": active_state,
+                "sub_state": sub_state,
+                "unit_file_state": unit_file_state,
+                "load_state": status.get("LoadState", "unknown"),
+                "running": active_state == "active" and sub_state == "running",
+                "enabled": _is_enabled(unit_file_state),
+            },
+        }
+
+        return formatted
+
+    async def start_service(self) -> Dict[str, object]:
+        return await self._service_action("start")
+
+    async def stop_service(self) -> Dict[str, object]:
+        return await self._service_action("stop")
+
+    async def restart_service(self) -> Dict[str, object]:
+        return await self._service_action("restart")
+
+    async def enable_service(self) -> Dict[str, object]:
+        return await self._service_action("enable")
+
+    async def disable_service(self) -> Dict[str, object]:
+        return await self._service_action("disable")
+
     async def _main(self):
-        self.loop = asyncio.get_event_loop()
-        decky.logger.info("Hello World!")
+        decky.logger.info("DeckShock4 Toggle backend ready.")
 
-    # Function called first during the unload process, utilize this to handle your plugin being stopped, but not
-    # completely removed
     async def _unload(self):
-        decky.logger.info("Goodnight World!")
-        pass
+        decky.logger.info("DeckShock4 Toggle backend unloading.")
 
-    # Function called after `_unload` during uninstall, utilize this to clean up processes and other remnants of your
-    # plugin that may remain on the system
     async def _uninstall(self):
-        decky.logger.info("Goodbye World!")
-        pass
-
-    async def start_timer(self):
-        self.loop.create_task(self.long_running())
+        decky.logger.info("DeckShock4 Toggle backend uninstalled.")
 
     # Migrations that should be performed before entering `_main()`.
     async def _migration(self):
-        decky.logger.info("Migrating")
-        # Here's a migration example for logs:
-        # - `~/.config/decky-template/template.log` will be migrated to `decky.decky_LOG_DIR/template.log`
+        decky.logger.info("DeckShock4 Toggle migration (legacy template cleanup).")
         decky.migrate_logs(os.path.join(decky.DECKY_USER_HOME,
-                                               ".config", "decky-template", "template.log"))
-        # Here's a migration example for settings:
-        # - `~/homebrew/settings/template.json` is migrated to `decky.decky_SETTINGS_DIR/template.json`
-        # - `~/.config/decky-template/` all files and directories under this root are migrated to `decky.decky_SETTINGS_DIR/`
+                                        ".config", "decky-template", "template.log"))
         decky.migrate_settings(
             os.path.join(decky.DECKY_HOME, "settings", "template.json"),
             os.path.join(decky.DECKY_USER_HOME, ".config", "decky-template"))
-        # Here's a migration example for runtime data:
-        # - `~/homebrew/template/` all files and directories under this root are migrated to `decky.decky_RUNTIME_DIR/`
-        # - `~/.local/share/decky-template/` all files and directories under this root are migrated to `decky.decky_RUNTIME_DIR/`
         decky.migrate_runtime(
             os.path.join(decky.DECKY_HOME, "template"),
             os.path.join(decky.DECKY_USER_HOME, ".local", "share", "decky-template"))

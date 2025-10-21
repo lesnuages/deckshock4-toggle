@@ -1,115 +1,217 @@
-import {
-  ButtonItem,
-  PanelSection,
-  PanelSectionRow,
-  Navigation,
-  staticClasses
-} from "@decky/ui";
-import {
-  addEventListener,
-  removeEventListener,
-  callable,
-  definePlugin,
-  toaster,
-  // routerHook
-} from "@decky/api"
-import { useState } from "react";
-import { FaShip } from "react-icons/fa";
+import { ButtonItem, PanelSection, PanelSectionRow, staticClasses } from "@decky/ui";
+import { callable, definePlugin, toaster } from "@decky/api";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { FaBolt } from "react-icons/fa";
 
-// import logo from "../assets/logo.png";
-
-// This function calls the python function "add", which takes in two numbers and returns their sum (as a number)
-// Note the type annotations:
-//  the first one: [first: number, second: number] is for the arguments
-//  the second one: number is for the return value
-const add = callable<[first: number, second: number], number>("add");
-
-// This function calls the python function "start_timer", which takes in no arguments and returns nothing.
-// It starts a (python) timer which eventually emits the event 'timer_event'
-const startTimer = callable<[], void>("start_timer");
-
-function Content() {
-  const [result, setResult] = useState<number | undefined>();
-
-  const onClick = async () => {
-    const result = await add(Math.random(), Math.random());
-    setResult(result);
-  };
-
-  return (
-    <PanelSection title="Panel Section">
-      <PanelSectionRow>
-        <ButtonItem
-          layout="below"
-          onClick={onClick}
-        >
-          {result ?? "Add two numbers via Python"}
-        </ButtonItem>
-      </PanelSectionRow>
-      <PanelSectionRow>
-        <ButtonItem
-          layout="below"
-          onClick={() => startTimer()}
-        >
-          {"Start Python timer"}
-        </ButtonItem>
-      </PanelSectionRow>
-
-      {/* <PanelSectionRow>
-        <div style={{ display: "flex", justifyContent: "center" }}>
-          <img src={logo} />
-        </div>
-      </PanelSectionRow> */}
-
-      {/*<PanelSectionRow>
-        <ButtonItem
-          layout="below"
-          onClick={() => {
-            Navigation.Navigate("/decky-plugin-test");
-            Navigation.CloseSideMenus();
-          }}
-        >
-          Router
-        </ButtonItem>
-      </PanelSectionRow>*/}
-    </PanelSection>
-  );
+type CommandResult = {
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+  returncode: number;
+  command: string[];
 };
 
-export default definePlugin(() => {
-  console.log("Template plugin initializing, this is called once on frontend startup")
+type ServiceStatus = {
+  id: string;
+  description: string;
+  active_state: string;
+  sub_state: string;
+  unit_file_state: string;
+  load_state: string;
+  running: boolean;
+  enabled: boolean;
+};
 
-  // serverApi.routerHook.addRoute("/decky-plugin-test", DeckyPluginRouterTest, {
-  //   exact: true,
-  // });
+type StatusResponse = {
+  ok: boolean;
+  status?: ServiceStatus;
+  error?: string;
+};
 
-  // Add an event listener to the "timer_event" event from the backend
-  const listener = addEventListener<[
-    test1: string,
-    test2: boolean,
-    test3: number
-  ]>("timer_event", (test1, test2, test3) => {
-    console.log("Template got timer_event with:", test1, test2, test3)
+const getStatus = callable<[], StatusResponse>("get_status");
+const startService = callable<[], CommandResult>("start_service");
+const stopService = callable<[], CommandResult>("stop_service");
+const restartService = callable<[], CommandResult>("restart_service");
+const enableService = callable<[], CommandResult>("enable_service");
+const disableService = callable<[], CommandResult>("disable_service");
+
+const SERVICE_TITLE = "DeckShock4 systemd service";
+
+function Content() {
+  const [status, setStatus] = useState<ServiceStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loadingStatus, setLoadingStatus] = useState<boolean>(false);
+  const [busyAction, setBusyAction] = useState<boolean>(false);
+
+  const toast = useCallback((body: string) => {
     toaster.toast({
-      title: "template got timer_event",
-      body: `${test1}, ${test2}, ${test3}`
+      title: "DeckShock4 Toggle",
+      body,
     });
-  });
+  }, []);
+
+  const refreshStatus = useCallback(async () => {
+    setLoadingStatus(true);
+    try {
+      const response = await getStatus();
+      if (response?.ok && response.status) {
+        setStatus(response.status);
+        setError(null);
+      } else {
+        const message = response?.error ?? "Unable to fetch DeckShock4 status.";
+        setError(message);
+        setStatus(null);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      setError(message);
+      setStatus(null);
+    } finally {
+      setLoadingStatus(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshStatus();
+  }, [refreshStatus]);
+
+  const handleAction = useCallback(
+    async (label: string, action: () => Promise<CommandResult>, successMessage: string) => {
+      setBusyAction(true);
+      try {
+        const result = await action();
+        if (result.ok) {
+          toast(successMessage);
+          await refreshStatus();
+        } else {
+          const message = result.stderr || result.stdout || `Failed to ${label}.`;
+          setError(message);
+          toast(message);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : `Failed to ${label}.`;
+        setError(message);
+        toast(message);
+      } finally {
+        setBusyAction(false);
+      }
+    },
+    [refreshStatus, toast],
+  );
+
+  const statusSummary = useMemo(() => {
+    if (!status) {
+      return loadingStatus ? "Loading…" : "Unknown";
+    }
+    return `${status.active_state}/${status.sub_state}`;
+  }, [status, loadingStatus]);
+
+  return (
+    <PanelSection title="DeckShock4">
+      <PanelSectionRow>
+        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+          <div className={staticClasses.Title}>{SERVICE_TITLE}</div>
+          <div>Status: {statusSummary}</div>
+          <div>Enabled: {status?.enabled ? "Yes" : "No"}</div>
+          {error && <div style={{ color: "var(--warning)" }}>{error}</div>}
+        </div>
+      </PanelSectionRow>
+
+      <PanelSectionRow>
+        <ButtonItem
+          layout="below"
+          disabled={loadingStatus || busyAction}
+          onClick={() => void refreshStatus()}
+        >
+          {loadingStatus ? "Refreshing…" : "Refresh status"}
+        </ButtonItem>
+      </PanelSectionRow>
+
+      <PanelSectionRow>
+        <ButtonItem
+          layout="below"
+          disabled={busyAction || loadingStatus || status?.running === true}
+          onClick={() =>
+            void handleAction("start DeckShock4", startService, "DeckShock4 service started.")
+          }
+        >
+          Start DeckShock4
+        </ButtonItem>
+      </PanelSectionRow>
+
+      <PanelSectionRow>
+        <ButtonItem
+          layout="below"
+          disabled={busyAction || loadingStatus || status?.running === false || !status}
+          onClick={() =>
+            void handleAction("stop DeckShock4", stopService, "DeckShock4 service stopped.")
+          }
+        >
+          Stop DeckShock4
+        </ButtonItem>
+      </PanelSectionRow>
+
+      <PanelSectionRow>
+        <ButtonItem
+          layout="below"
+          disabled={busyAction || loadingStatus}
+          onClick={() =>
+            void handleAction(
+              "restart DeckShock4",
+              restartService,
+              "DeckShock4 service restarted.",
+            )
+          }
+        >
+          Restart DeckShock4
+        </ButtonItem>
+      </PanelSectionRow>
+
+      <PanelSectionRow>
+        <ButtonItem
+          layout="below"
+          disabled={busyAction || loadingStatus || status?.enabled === true || !status}
+          onClick={() =>
+            void handleAction(
+              "enable DeckShock4",
+              enableService,
+              "DeckShock4 service enabled at boot.",
+            )
+          }
+        >
+          Enable DeckShock4
+        </ButtonItem>
+      </PanelSectionRow>
+
+      <PanelSectionRow>
+        <ButtonItem
+          layout="below"
+          disabled={busyAction || loadingStatus || status?.enabled === false || !status}
+          onClick={() =>
+            void handleAction(
+              "disable DeckShock4",
+              disableService,
+              "DeckShock4 service disabled at boot.",
+            )
+          }
+        >
+          Disable DeckShock4
+        </ButtonItem>
+      </PanelSectionRow>
+    </PanelSection>
+  );
+}
+
+export default definePlugin(() => {
+  console.log("DeckShock4 Toggle frontend initialized.");
 
   return {
-    // The name shown in various decky menus
-    name: "Test Plugin",
-    // The element displayed at the top of your plugin's menu
-    titleView: <div className={staticClasses.Title}>Decky Example Plugin</div>,
-    // The content of your plugin's menu
+    name: "DeckShock4 Toggle",
+    titleView: <div className={staticClasses.Title}>DeckShock4 Control</div>,
     content: <Content />,
-    // The icon displayed in the plugin list
-    icon: <FaShip />,
-    // The function triggered when your plugin unloads
+    icon: <FaBolt />,
     onDismount() {
-      console.log("Unloading")
-      removeEventListener("timer_event", listener);
-      // serverApi.routerHook.removeRoute("/decky-plugin-test");
+      console.log("DeckShock4 Toggle frontend unmounted.");
     },
   };
 });
