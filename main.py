@@ -42,16 +42,34 @@ def _should_fallback_to_system(stderr: str) -> bool:
         return True
     return False
 
+def _env_for_user_systemd():
+    env = os.environ.copy()
+    # Steam Deck user id is 1000 for 'deck'
+    env.setdefault("XDG_RUNTIME_DIR", "/run/user/1000")
+    env.setdefault("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
+    return env
+
+async def _exec(cmd: list[str]):
+    # IMPORTANT: pass env and no shell
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=_env_for_user_systemd(),
+    )
+    out_b, err_b = await proc.communicate()
+    return proc.returncode, out_b.decode(), err_b.decode()
+
 
 class Plugin:
     async def _run_systemctl(self, *args: str) -> Dict[str, object]:
         commands: List[Tuple[List[str], bool]] = [
-            (["systemctl", "--user", *args], True),
-            (["systemctl", *args], False),
+            (["/usr/bin/systemctl", "--user", *args], True),
+            (["/usr/bin/systemctl", *args], False),
         ]
 
         last_result: Optional[Dict[str, object]] = None
-        env = os.environ.copy()
+        env = _env_for_user_systemd()
         removed_env_vars: List[str] = []
         for var in ("LD_LIBRARY_PATH", "PYTHONHOME", "PYTHONPATH"):
             if var in env:
