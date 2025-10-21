@@ -1,4 +1,4 @@
-import { ButtonItem, PanelSection, PanelSectionRow, staticClasses } from "@decky/ui";
+import { ButtonItem, PanelSection, PanelSectionRow, ToggleField, staticClasses } from "@decky/ui";
 import { callable, definePlugin, toaster } from "@decky/api";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { FaBolt } from "react-icons/fa";
@@ -107,11 +107,11 @@ function Content() {
   }, [status, loadingStatus]);
 
   return (
-    <PanelSection title="Service">
+    <PanelSection title="Service status">
       <PanelSectionRow>
         <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
           <div>Status: {statusSummary}</div>
-          <div>Enabled: {status?.enabled ? "Yes" : "No"}</div>
+          <div>Start on boot: {status?.enabled ? "Yes" : "No"}</div>
           {error && <div style={{ color: "var(--warning)" }}>{error}</div>}
         </div>
       </PanelSectionRow>
@@ -127,27 +127,59 @@ function Content() {
       </PanelSectionRow>
 
       <PanelSectionRow>
-        <ButtonItem
-          layout="below"
-          disabled={busyAction || loadingStatus || status?.running === true}
-          onClick={() =>
-            void handleAction("start DeckShock4", startService, "DeckShock4 service started.")
-          }
-        >
-          Start DeckShock4
-        </ButtonItem>
+        <ToggleField
+          layout="inline"
+          label="Service running"
+          description="Start or stop the DeckShock4 service."
+          disabled={busyAction || loadingStatus || !status}
+          checked={status?.running ?? false}
+          onChange={(checked) => {
+            if (!status || status.running === checked) {
+              return;
+            }
+            if (checked) {
+              void handleAction(
+                "start DeckShock4",
+                startService,
+                "DeckShock4 service started.",
+              );
+            } else {
+              void handleAction(
+                "stop DeckShock4",
+                stopService,
+                "DeckShock4 service stopped.",
+              );
+            }
+          }}
+        />
       </PanelSectionRow>
 
       <PanelSectionRow>
-        <ButtonItem
-          layout="below"
-          disabled={busyAction || loadingStatus || status?.running === false || !status}
-          onClick={() =>
-            void handleAction("stop DeckShock4", stopService, "DeckShock4 service stopped.")
-          }
-        >
-          Stop DeckShock4
-        </ButtonItem>
+        <ToggleField
+          layout="inline"
+          label="Enable at boot"
+          description="Enable or disable DeckShock4 on startup."
+          disabled={busyAction || loadingStatus || !status}
+          checked={status?.enabled ?? false}
+          onChange={(checked) => {
+            if (!status || status.enabled === checked) {
+              return;
+            }
+            if (checked) {
+              void handleAction(
+                "enable DeckShock4",
+                enableService,
+                "DeckShock4 service enabled at boot.",
+              );
+            } else {
+              void handleAction(
+                "disable DeckShock4",
+                disableService,
+                "DeckShock4 service disabled at boot.",
+              );
+            }
+          }}
+        />
       </PanelSectionRow>
 
       <PanelSectionRow>
@@ -166,37 +198,6 @@ function Content() {
         </ButtonItem>
       </PanelSectionRow>
 
-      <PanelSectionRow>
-        <ButtonItem
-          layout="below"
-          disabled={busyAction || loadingStatus || status?.enabled === true || !status}
-          onClick={() =>
-            void handleAction(
-              "enable DeckShock4",
-              enableService,
-              "DeckShock4 service enabled at boot.",
-            )
-          }
-        >
-          Enable DeckShock4
-        </ButtonItem>
-      </PanelSectionRow>
-
-      <PanelSectionRow>
-        <ButtonItem
-          layout="below"
-          disabled={busyAction || loadingStatus || status?.enabled === false || !status}
-          onClick={() =>
-            void handleAction(
-              "disable DeckShock4",
-              disableService,
-              "DeckShock4 service disabled at boot.",
-            )
-          }
-        >
-          Disable DeckShock4
-        </ButtonItem>
-      </PanelSectionRow>
     </PanelSection>
   );
 }
@@ -206,7 +207,7 @@ export default definePlugin(() => {
 
   return {
     name: "DeckShock4 Toggle",
-    titleView: <div className={staticClasses.Title}>DeckShock4 Control</div>,
+    titleView: <div className={staticClasses.Title}>DeckShock4</div>,
     content: <Content />,
     icon: <FaBolt />,
     onDismount() {
