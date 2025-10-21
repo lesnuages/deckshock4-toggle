@@ -1,6 +1,6 @@
 # DeckShock4 Toggle
 
-DeckShock4 Toggle is a Decky plugin that lets you monitor and control the native `deckshock4` systemd service on a Steam Deck. Use it to quickly start, stop, restart, or toggle the service's boot behaviour without leaving Game Mode.
+DeckShock4 Toggle is a Decky plugin that lets you monitor and control [deckshock4](https://github.com/the-maazu/deckshock4) via a systemd service on a Steam Deck. Use it to quickly start, stop, restart, or toggle the service's boot behaviour without leaving Game Mode.
 
 ## Features
 
@@ -30,6 +30,10 @@ The generated bundle will be placed in the `dist/` directory. Deploy it to your 
 - Backend logic lives in `main.py` and exposes callable helpers for the frontend through Decky's RPC bridge.
 - Frontend UI is implemented in `src/index.tsx` using `@decky/ui` components.
 - When iterating on the frontend, re-run `pnpm run build` (or `pnpm run watch`) and redeploy the resulting bundle.
+
+## Credits
+
+deckshock4 original author [the-maazu](https://github.com/the-maazu/deckshock4)
 
 ## License
 
